@@ -33,11 +33,13 @@ def _asset_image(asset, max_w_mm: float, max_h_mm: float) -> Optional[RLImage]:
         return None
     try:
         img = RLImage(str(path))
+        # Force decode now so a corrupt file raises here, not during doc.build()
+        _iw, _ih = img.imageWidth, img.imageHeight
         max_w = max_w_mm * mm
         max_h = max_h_mm * mm
-        ratio = min(max_w / img.imageWidth, max_h / img.imageHeight)
-        img.drawWidth = img.imageWidth * ratio
-        img.drawHeight = img.imageHeight * ratio
+        ratio = min(max_w / _iw, max_h / _ih)
+        img.drawWidth = _iw * ratio
+        img.drawHeight = _ih * ratio
         return img
     except Exception:
         return None

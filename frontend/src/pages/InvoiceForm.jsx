@@ -72,11 +72,10 @@ export default function InvoiceForm() {
     }
   }, [editing, id, company?.updated_at]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-suggest GST type based on states
+  // Auto-suggest GST type based on states (runs when a customer is picked)
   const selectedCustomer = customers.find((c) => c.id === form.customer_id);
   useEffect(() => {
     if (!selectedCustomer || !company?.state_code || !selectedCustomer.state_code) return;
-    if (form.gst_type === "none") return;
     const shouldBe = selectedCustomer.state_code === company.state_code ? "cgst_sgst" : "igst";
     if (form.gst_type !== shouldBe) setForm((f) => ({ ...f, gst_type: shouldBe }));
   }, [selectedCustomer?.state_code, company?.state_code]);  // eslint-disable-line react-hooks/exhaustive-deps

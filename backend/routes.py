@@ -8,6 +8,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 import io
+from PIL import Image as PILImage, UnidentifiedImageError
 
 from db import (
     db, UPLOAD_ASSETS, MAX_ASSET_SIZE, ALLOWED_MIME, EXT_BY_MIME,
@@ -51,19 +52,14 @@ def _current_fiscal_year(d: date) -> str:
 
 
 async def _next_invoice_number(prefix: str, fiscal_year: str) -> str:
+    from pymongo import ReturnDocument
     counter_key = f"invoice::{prefix}::{fiscal_year}"
-    res = await db.counters.find_one_and_update(
+    doc = await db.counters.find_one_and_update(
         {"_id": counter_key},
         {"$inc": {"seq": 1}},
         upsert=True,
-        return_document=True,
+        return_document=ReturnDocument.AFTER,
     )
-    seq = (res or {}).get("seq", 1) if res else 1
-    if res is None:
-        # motor returns updated doc when return_document=True
-        seq = 1
-    # fetch again safely
-    doc = await db.counters.find_one({"_id": counter_key})
     seq = doc["seq"] if doc else 1
     return f"{prefix}/{fiscal_year}/{seq:04d}"
 
@@ -135,6 +131,15 @@ async def api_upload_asset(asset_type: str, file: UploadFile = File(...)):
         raise HTTPException(400, "Empty file uploaded.")
     if len(contents) > MAX_ASSET_SIZE:
         raise HTTPException(400, "File is too large. Maximum size is 2 MB.")
+
+    # For raster images, verify decodable bytes with Pillow to prevent corrupt files
+    # from breaking PDF generation later. SVG is text-based and skipped.
+    if file.content_type != "image/svg+xml":
+        try:
+            with PILImage.open(io.BytesIO(contents)) as im:
+                im.verify()
+        except (UnidentifiedImageError, OSError, ValueError):
+            raise HTTPException(400, "The uploaded file is not a valid image.")
 
     company = await get_or_create_company()
     prev: Optional[CompanyAsset] = getattr(company, asset_type)

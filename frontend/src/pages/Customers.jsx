@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Users } from "lucide-react";
 
@@ -109,7 +109,10 @@ export default function Customers() {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-2xl" data-testid="customer-dialog">
-          <DialogHeader><DialogTitle>{editing ? "Edit customer" : "Add customer"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit customer" : "Add customer"}</DialogTitle>
+            <DialogDescription>Master record used for billing. GSTIN and State Code drive GST type.</DialogDescription>
+          </DialogHeader>
           <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <F label="Name *"><Input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})} data-testid="cust-name" /></F>
             <F label="Contact person"><Input value={form.contact_person} onChange={(e)=>setForm({...form,contact_person:e.target.value})} data-testid="cust-contact" /></F>

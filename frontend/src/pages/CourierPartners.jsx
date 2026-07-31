@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Plus, Pencil, Trash2, Truck } from "lucide-react";
 
@@ -93,7 +93,10 @@ export default function CourierPartners() {
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-lg" data-testid="partner-dialog">
-          <DialogHeader><DialogTitle>{editing ? "Edit partner" : "Add courier partner"}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit partner" : "Add courier partner"}</DialogTitle>
+            <DialogDescription>Courier company used on invoice line items (docket-level partner).</DialogDescription>
+          </DialogHeader>
           <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <F label="Partner name *"><Input required value={form.name} onChange={(e)=>setForm({...form,name:e.target.value})} data-testid="partner-name" /></F>
             <F label="Code"><Input value={form.code} onChange={(e)=>setForm({...form,code:e.target.value})} data-testid="partner-code" /></F>
