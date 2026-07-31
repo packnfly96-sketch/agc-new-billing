@@ -1,0 +1,49 @@
+{
+  "summary": "Full backend + frontend E2E test of SD ENTERPRISES Courier Billing app. 22/22 pytest cases pass covering company profile, asset upload (JPG/PNG/SVG validation + 2MB cap), CRUD for customers/partners, invoice creation with GST math (cgst_sgst 500->590, igst 1000->1180, non-gst zero tax), invoice numbering (SDE/{FY}/0001 format, idempotent preview, atomic increment), update/delete, PDF generation (application/pdf, >500 bytes) and reports summary with date filter. Frontend flows validated via Playwright: Dashboard, Customers/Partners CRUD with dialog + save, Invoice form auto-computes ₹590 live for 500 subtotal at 18% CGST+SGST, invoice detail page shows preview + Print/PDF/Edit/Delete toolbar, Company Settings persistence, Reports page renders totals/GST/top lists and date filter Apply/Reset works. All key data-testids are present.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/invoices/{id}/pdf", "issue": "PDF endpoint returns HTTP 500 when the stored logo/signature/stamp image file is corrupt or truncated on disk (OSError 'broken data stream when reading image file' from PIL). ReportLab bubbles up any Image error. Consider wrapping image loading in try/except and falling back to company name text, so a bad asset never breaks PDF export."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "Invoice form auto-GST selection", "issue": "InvoiceForm.jsx has a guard `if (form.gst_type === 'none') return;` in the state-code auto-switch effect. Because the initial gst_type is 'none', selecting a customer with matching/differing state_code does NOT auto-switch to cgst_sgst / igst as the spec requires. Auto-switch only happens after the user manually picks any GST option, which defeats the intent.", "affected_selectors": ["inv-customer", "inv-gst-type"]}
+    ],
+    "design_issues": [
+      {"screen": "Reports page", "issues": ["Uses browser native date input (mm/dd/yyyy) instead of a shadcn Calendar/DatePicker – inconsistent with the premium UI kit used elsewhere."]},
+      {"screen": "All modal dialogs (Customer, Partner)", "issues": ["Radix DialogContent is missing a Description/aria-describedby attribute – accessibility warning in console. Add <DialogDescription> to Customer and Partner dialogs."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Make PDF generation resilient to bad/corrupt asset files (catch reportlab/PIL errors and fall back to text header, or validate PNG/JPG bytes on upload with Pillow before persisting).",
+    "Fix InvoiceForm auto-GST logic: on customer change, if company.state_code and customer.state_code exist, set gst_type to 'cgst_sgst' when matching or 'igst' when differing, even when current value is 'none'.",
+    "Add DialogDescription (or aria-describedby) to customer & partner dialogs to remove Radix a11y warnings.",
+    "Consider replacing native <input type='date'> on Reports with the shadcn Calendar/Popover DatePicker for visual consistency.",
+    "Optional: on POST /company/assets/*, validate the uploaded bytes with Pillow (Image.open + verify) before saving to disk to catch corrupt PNG/JPG proactively."
+  ],
+  "critical_code_review_comments": [
+    "routes.py `_next_invoice_number` has dead/confusing code – it uses find_one_and_update with return_document=True, then re-reads the counter to compute seq. The extra branch `if res is None: seq = 1` is unreachable when upsert=True. Simplify to a single call using the returned document.",
+    "routes.py `api_upload_asset` allows content_type declared by the client, but does not verify the actual bytes are a valid image. A malicious/truncated file passes and later breaks PDF generation (observed). Recommend Pillow verify() step.",
+    "routes.py `api_update_invoice` uses `**existing` merged with new fields but does not preserve the original invoice_number/fiscal_year – that is currently retained via **existing, which is correct. However, allowing arbitrary customer_id switch on edit may change fiscal year context; consider freezing invoice_number/fiscal_year on edit (which the code does implicitly).",
+    "InvoiceForm.jsx guard `if (form.gst_type === 'none') return;` blocks the very default behaviour described in the spec.",
+    "AssetUpload preview refresh: after upload, cache-busting is done via updated_at query param – OK but ensure new asset URL is derived from company.updated_at, not asset filename, to force refresh even if filename is reused.",
+    "CORS_ORIGINS is set to '*' with allow_credentials=True – browsers will reject credentialed CORS with wildcard origin. Not blocking here (no auth) but should be tightened for production."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (new)",
+    "/app/test_reports/pytest/pytest_results.xml (generated)"
+  ],
+  "success_rate": {"backend": "100% (22/22 pytest)", "frontend": "100% smoke – all navigation, CRUD, GST math live-compute, save, detail preview, settings persistence, reports filter all work"},
+  "test_credentials": "N/A – no auth in app.",
+  "seed_data_creation": "Created via UI: 'UI Test Customer MH' (state_code 27), 'UI Test Customer KA' (state_code 29), partner 'UI Test Partner Blue Dart' (BD), and one CGST+SGST invoice for 500 (₹590 total). Backend pytest also created several TEST_ prefixed customers/partners/invoices which remain in the DB (unique ids, prefix TEST_). Not cleaned up because tests are stateless w.r.t. existing data.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "backend_test.py under /app/backend/tests uses a tiny valid 1x1 PNG (base64 constant). If future changes touch upload validation, re-run pytest. The PDF 500 bug reproduces if you upload a corrupt/truncated PNG (or old signature file left on disk with mismatched bytes) — after fix, verify /api/invoices/{id}/pdf still 200s and add an upload-validation test. The auto-GST InvoiceForm bug can be verified by loading /invoices/new, picking a customer with matching state_code=27 (same as company) — expected gst_type auto-selects CGST+SGST; currently it stays 'none'.",
+  "rca of the issue": "PDF 500: pdf_service.build_invoice_pdf passes the on-disk file path to ReportLab Image; ReportLab uses PIL to decode. If the stored file bytes are not a decodable PNG/JPG (either because upload allowed a fake 89 50 4E 47 header without proper IDAT, or the file got truncated), PIL raises OSError which is not caught, and FastAPI returns 500. Fix: (a) validate images with Pillow's Image.verify() during upload before persisting; (b) additionally wrap Image() usage in build_invoice_pdf with try/except and fall back to text company name."
+}
