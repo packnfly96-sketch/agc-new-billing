@@ -70,8 +70,10 @@ async def _clear_failures(identifier: str) -> None:
 @auth_router.post("/login")
 async def login(payload: LoginRequest, request: Request, response: Response):
     email = payload.email.lower().strip()
-    ip = request.client.host if request.client else "unknown"
-    identifier = f"{ip}:{email}"
+    # Since this is a single-admin app and we sit behind an ingress/LB where
+    # request.client.host is not the real client IP, we key the brute-force
+    # counter on the email alone (global per-account cap).
+    identifier = f"email:{email}"
 
     await _check_lockout(identifier)
 
