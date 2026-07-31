@@ -1,0 +1,123 @@
+{
+  "theme": "light",
+  "typography": {
+    "fonts": {
+      "headings": "Outfit, sans-serif",
+      "body": "IBM Plex Sans, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl tracking-tight leading-none font-semibold",
+      "h2": "text-2xl sm:text-3xl tracking-tight leading-none font-medium",
+      "h3": "text-xl sm:text-2xl tracking-tight font-medium",
+      "h4": "text-lg font-medium",
+      "body": "text-sm sm:text-base leading-relaxed",
+      "labels": "text-xs font-semibold tracking-[0.1em] uppercase"
+    },
+    "rules": [
+      "DO NOT use Inter, Roboto, Open Sans, or Lato for Headings.",
+      "Use tracking-tight for all headings above 32px.",
+      "Never center-align paragraphs; left-align forms, lists, and dense content."
+    ]
+  },
+  "colors": {
+    "archetype": "SWISS & HIGH-CONTRAST",
+    "background": {
+      "default": "#FFFFFF",
+      "muted": "#F8FAFC",
+      "surface": "#FFFFFF"
+    },
+    "text": {
+      "primary": "#0F172A",
+      "secondary": "#475569",
+      "muted": "#64748B"
+    },
+    "brand": {
+      "primary": "#2563EB",
+      "hover": "#1D4ED8",
+      "active": "#1E40AF"
+    },
+    "borders": {
+      "subtle": "#E2E8F0",
+      "default": "#CBD5E1",
+      "focus": "#2563EB"
+    },
+    "status": {
+      "error": "#EF4444",
+      "success": "#10B981"
+    },
+    "rules": [
+      "Tinted Grey Rule: Neutral greys are subtly tinted cool (slate).",
+      "Ensure Normal Text has a minimum 4.5:1 contrast ratio.",
+      "Interactive elements must have high contrast hover states, e.g., hover:bg-blue-700 hover:text-white.",
+      "Focus rings should use primary color, e.g., focus:ring-2 focus:ring-blue-500/50."
+    ]
+  },
+  "visual_enhancers": {
+    "surfaces": {
+      "header": "Crystal Glass: backdrop-blur-xl bg-white/70, 1px subtle bottom border border-slate-200/50. NO FULLY TRANSPARENT HEADERS.",
+      "cards": "Neumorphism Tactile: Flat background, 1px subtle border, sharp inner contrasts, subtle ambient shadow (shadow-sm) on hover.",
+      "tables": "Grid Borders: Technical look with border-b on rows, minimal spacing to increase density."
+    },
+    "spacing": [
+      "Use generous spacing: 2-3x typical padding. Prefer p-6 or p-8 inside cards.",
+      "Containers with borders MUST have padding on text content to avoid collision."
+    ]
+  },
+  "layouts": {
+    "strategy": "The Bento Grid & High Density Mode",
+    "grids": [
+      "High Density Dashboard: Base grid-cols-1 md:grid-cols-3 lg:grid-cols-4, gap-6.",
+      "Settings Layout: Use a 2-column setup on desktop (Sidebar nav + Main content area) or dense forms inside card containers."
+    ],
+    "alignment": [
+      "Mobile-first always.",
+      "Left-align forms and dense content.",
+      "Optical alignment over geometrical (e.g., icons next to text)."
+    ]
+  },
+  "motion": {
+    "rules": [
+      "No universal transitions (e.g., transition-all). Target specific properties: transition-colors, transition-opacity, transition-transform.",
+      "Hover States: Slight lift (-translate-y-[2px]) and shadow-md on cards.",
+      "Buttons: Scale down slightly on active (active:scale-95).",
+      "Respect prefers-reduced-motion."
+    ]
+  },
+  "accessibility": {
+    "rules": [
+      "All interactive elements MUST have visible focus states.",
+      "Use data-testid attributes for ALL interactive elements (e.g., data-testid='logo-upload-input', data-testid='save-company-btn').",
+      "Ensure proper aria-labels for icon-only buttons (like the logo remove button)."
+    ]
+  },
+  "component_rules": {
+    "forms": "Use Shadcn Form, Input, Label. Make inputs dense (h-10) with crisp borders.",
+    "buttons": "Pill-shaped or slightly rounded (rounded-md). High contrast brand primary for CTAs.",
+    "tables": "Shadcn Table for invoice history. Hover states on rows.",
+    "toasts": "Use Sonner for notifications (e.g., 'Logo uploaded successfully', 'File too large').",
+    "icons": "Use lucide-react for all standard icons."
+  },
+  "instructions_to_main_agent": [
+    "Implement the 'Settings > My Company' page.",
+    "Include a 'Company Logo' upload field using an <input type='file' accept='image/jpeg, image/png, image/svg+xml' />.",
+    "Enforce a 2 MB file size limit with a clear error message (via Sonner toast) if exceeded.",
+    "Show a live logo preview using an object URL before the user saves.",
+    "Provide buttons to Replace and Remove the uploaded logo.",
+    "Save the company profile along with the uploaded logo (store the file appropriately and save its path/URL in MongoDB).",
+    "Display the uploaded logo in: 1. Application Header, 2. Invoice Preview, 3. Printed Invoice, 4. PDF Invoice.",
+    "If no logo exists, display the company name as a fallback in the Application Header and invoices.",
+    "No hardcoded dummy images in production.",
+    "Create the My Company profile form fields (Name, Address, Tax ID, Email, Phone).",
+    "Ensure the header layout handles the logo elegantly (max height ~40px).",
+    "Always apply a `data-testid` to buttons, inputs, and major containers."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "DO NOT use generic centered layouts or simplistic gradients.",
+    "Create depth through layered design elements with proper z-index.",
+    "NEVER use generic emoji characters for icons.",
+    "Prioritize Shadcn UI components from src/components/ui/.",
+    "Override default component sizing if it prevents content from fitting naturally.",
+    "Do not add .App { text-align: center; } to global CSS."
+  ]
+}
