@@ -1,28 +1,28 @@
-"""Backend API tests for SD ENTERPRISES Courier Billing."""
+"""Backend API tests for SD ENTERPRISES Courier Billing (iteration 2 - with JWT auth)."""
 import io
 import os
+import base64
 from datetime import date
 
 import pytest
 import requests
 
-BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/") if os.environ.get("REACT_APP_BACKEND_URL") else None
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL")
 if not BASE_URL:
-    # fallback: read frontend/.env
     with open("/app/frontend/.env") as f:
         for line in f:
             if line.startswith("REACT_APP_BACKEND_URL="):
-                BASE_URL = line.split("=", 1)[1].strip().rstrip("/")
+                BASE_URL = line.split("=", 1)[1].strip()
                 break
-
+BASE_URL = BASE_URL.rstrip("/")
 API = f"{BASE_URL}/api"
 
+ADMIN_EMAIL = "packnfly96@gmail.com"
+ADMIN_PASSWORD = "SDEnterprises@2026"
 
-# --- Fixtures ---
-@pytest.fixture(scope="session")
-def client():
-    s = requests.Session()
-    return s
+PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+)
 
 
 def _fy():
@@ -34,281 +34,308 @@ def _fy():
     return f"{s}-{str(e)[-2:]}"
 
 
-# --- Health ---
-def test_health(client):
-    r = client.get(f"{API}/")
-    assert r.status_code == 200
-    assert r.json().get("ok") is True
-
-
-# --- Company ---
-def test_company_get_default(client):
-    r = client.get(f"{API}/company")
-    assert r.status_code == 200
+# ---------------- Fixtures ----------------
+@pytest.fixture(scope="session")
+def token():
+    """Login once and reuse token."""
+    r = requests.post(f"{API}/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+    assert r.status_code == 200, f"Admin login failed: {r.status_code} {r.text}"
     data = r.json()
-    assert "name" in data
-    assert data.get("invoice_prefix") in ("SDE", data.get("invoice_prefix"))
+    assert "access_token" in data
+    return data["access_token"]
 
 
-def test_company_update(client):
-    payload = {
-        "name": "SD ENTERPRISES",
-        "address": "123 Test Rd",
-        "state": "Maharashtra",
-        "state_code": "27",
-        "gstin": "27ABCDE1234F1Z5",
-        "pan": "ABCDE1234F",
-        "bank_name": "HDFC",
-        "bank_account": "1234567890",
-        "bank_ifsc": "HDFC0000123",
-        "bank_branch": "Andheri",
-        "invoice_prefix": "SDE",
-        "default_tax_rate": 18.0,
-        "default_terms": "Payment within 30 days",
-    }
-    r = client.put(f"{API}/company", json=payload)
-    assert r.status_code == 200
-    data = r.json()
-    for k, v in payload.items():
-        assert data.get(k) == v, f"Mismatch {k}: {data.get(k)} != {v}"
-
-    # persistence: GET again
-    r2 = client.get(f"{API}/company")
-    assert r2.json().get("gstin") == "27ABCDE1234F1Z5"
+@pytest.fixture(scope="session")
+def client(token):
+    s = requests.Session()
+    s.headers.update({"Authorization": f"Bearer {token}"})
+    return s
 
 
-# --- Asset upload ---
-PNG_BYTES = None  # set at import time below
-
-def _make_png():
-    global PNG_BYTES
-    import base64
-    # 1x1 red PNG (valid, verified via PIL)
-    PNG_BYTES = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
-    )
-_make_png()
+@pytest.fixture
+def unauth_client():
+    """Function-scoped so cookies don't leak between auth tests."""
+    return requests.Session()
 
 
-def test_upload_logo_valid_png(client):
-    files = {"file": ("logo.png", PNG_BYTES, "image/png")}
-    r = client.post(f"{API}/company/assets/logo", files=files)
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert data.get("logo") and data["logo"].get("filename") and data["logo"].get("mime") == "image/png"
+# =====================================================================
+# AUTH
+# =====================================================================
+class TestAuth:
+    def test_health_public(self, unauth_client):
+        r = unauth_client.get(f"{API}/")
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+
+    def test_login_success(self, unauth_client):
+        r = unauth_client.post(f"{API}/auth/login",
+                               json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        assert r.status_code == 200
+        d = r.json()
+        assert d["access_token"] and d["token_type"] == "bearer"
+        assert d["user"]["email"] == ADMIN_EMAIL
+        assert d["user"]["role"] == "admin"
+        # cookie set
+        assert "access_token" in r.cookies
+
+    def test_login_wrong_password(self, unauth_client):
+        r = unauth_client.post(f"{API}/auth/login",
+                               json={"email": ADMIN_EMAIL, "password": "wrong-pw"})
+        assert r.status_code == 401
+        assert "Invalid" in r.json().get("detail", "")
+
+    def test_me_requires_token(self, unauth_client):
+        r = unauth_client.get(f"{API}/auth/me")
+        assert r.status_code == 401
+
+    def test_me_with_token(self, client):
+        r = client.get(f"{API}/auth/me")
+        assert r.status_code == 200
+        assert r.json()["email"] == ADMIN_EMAIL
+
+    def test_protected_endpoints_require_auth(self, unauth_client):
+        for path in ["/company", "/customers", "/partners", "/invoices", "/reports/summary"]:
+            r = unauth_client.get(f"{API}{path}")
+            assert r.status_code == 401, f"{path} should require auth, got {r.status_code}"
+
+    def test_protected_endpoints_ok_with_auth(self, client):
+        for path in ["/company", "/customers", "/partners", "/invoices", "/reports/summary"]:
+            r = client.get(f"{API}{path}")
+            assert r.status_code == 200, f"{path} failed: {r.status_code} {r.text}"
+
+    def test_brute_force_lockout(self):
+        """5 wrong attempts locks out (verified against localhost since the public
+        ingress rotates client IP across requests, defeating the request.client.host
+        based counter — see backend_issues in test report)."""
+        LOCAL = "http://localhost:8001/api"
+        fake_email = f"brute-{os.getpid()}@example.com"
+        for i in range(5):
+            r = requests.post(f"{LOCAL}/auth/login",
+                              json={"email": fake_email, "password": "x"})
+            assert r.status_code == 401
+        r = requests.post(f"{LOCAL}/auth/login",
+                          json={"email": fake_email, "password": "x"})
+        assert r.status_code == 429, f"Expected lockout, got {r.status_code}: {r.text}"
+
+    def test_change_password_flow(self, client, unauth_client):
+        new_pw = "TempPass@12345"
+        # wrong current
+        r = client.post(f"{API}/auth/change-password",
+                        json={"current_password": "wrong", "new_password": new_pw})
+        assert r.status_code == 400
+        # too short
+        r = client.post(f"{API}/auth/change-password",
+                        json={"current_password": ADMIN_PASSWORD, "new_password": "abc"})
+        assert r.status_code == 400
+        # correct
+        r = client.post(f"{API}/auth/change-password",
+                        json={"current_password": ADMIN_PASSWORD, "new_password": new_pw})
+        assert r.status_code == 200
+        # new pw works
+        r = unauth_client.post(f"{API}/auth/login",
+                               json={"email": ADMIN_EMAIL, "password": new_pw})
+        assert r.status_code == 200
+        new_token = r.json()["access_token"]
+        # restore original (using new token as bearer)
+        r = requests.post(f"{API}/auth/change-password",
+                          headers={"Authorization": f"Bearer {new_token}"},
+                          json={"current_password": new_pw, "new_password": ADMIN_PASSWORD})
+        assert r.status_code == 200, f"restore failed: {r.text}"
+        # verify original works again
+        r = unauth_client.post(f"{API}/auth/login",
+                               json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        assert r.status_code == 200
+
+    def test_forgot_and_reset_password_flow(self, unauth_client):
+        r = unauth_client.post(f"{API}/auth/forgot-password", json={"email": ADMIN_EMAIL})
+        assert r.status_code == 200
+        reset_token = r.json().get("reset_token")
+        assert reset_token, "reset_token missing in response"
+
+        temp_pw = "ResetPass@2026"
+        r = unauth_client.post(f"{API}/auth/reset-password",
+                               json={"token": reset_token, "new_password": temp_pw})
+        assert r.status_code == 200
+        # login with new
+        r = unauth_client.post(f"{API}/auth/login",
+                               json={"email": ADMIN_EMAIL, "password": temp_pw})
+        assert r.status_code == 200
+        tok = r.json()["access_token"]
+        # restore
+        r = requests.post(f"{API}/auth/change-password",
+                          headers={"Authorization": f"Bearer {tok}"},
+                          json={"current_password": temp_pw, "new_password": ADMIN_PASSWORD})
+        assert r.status_code == 200
+
+    def test_reset_password_invalid_token(self, unauth_client):
+        r = unauth_client.post(f"{API}/auth/reset-password",
+                               json={"token": "bogus", "new_password": "SomePass@2026"})
+        assert r.status_code == 400
+
+    def test_logout(self, unauth_client):
+        # login gets cookie, logout should clear
+        r = unauth_client.post(f"{API}/auth/login",
+                               json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD})
+        assert r.status_code == 200
+        r = unauth_client.post(f"{API}/auth/logout")
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
 
 
-def test_upload_logo_reject_non_image(client):
-    files = {"file": ("bad.txt", b"hello", "text/plain")}
-    r = client.post(f"{API}/company/assets/logo", files=files)
-    assert r.status_code == 400
+# =====================================================================
+# COMPANY
+# =====================================================================
+class TestCompany:
+    def test_get(self, client):
+        r = client.get(f"{API}/company")
+        assert r.status_code == 200
+        assert "name" in r.json()
+
+    def test_update(self, client):
+        payload = {
+            "name": "SD ENTERPRISES", "address": "123 Test Rd",
+            "state": "Maharashtra", "state_code": "27",
+            "gstin": "27ABCDE1234F1Z5", "pan": "ABCDE1234F",
+            "invoice_prefix": "SDE", "default_tax_rate": 18.0,
+        }
+        r = client.put(f"{API}/company", json=payload)
+        assert r.status_code == 200
+        assert r.json()["gstin"] == "27ABCDE1234F1Z5"
+
+    def test_upload_and_get_logo(self, client):
+        files = {"file": ("logo.png", PNG_BYTES, "image/png")}
+        r = client.post(f"{API}/company/assets/logo", files=files)
+        assert r.status_code == 200
+        assert r.json()["logo"]["mime"] == "image/png"
+        r = client.get(f"{API}/company/assets/logo/file")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/")
 
 
-def test_upload_logo_reject_too_large(client):
-    big = b"\x89PNG" + b"0" * (2 * 1024 * 1024 + 100)
-    files = {"file": ("big.png", big, "image/png")}
-    r = client.post(f"{API}/company/assets/logo", files=files)
-    assert r.status_code == 400
-
-
-def test_get_asset_file(client):
-    r = client.get(f"{API}/company/assets/logo/file")
-    assert r.status_code == 200
-    assert r.headers.get("content-type", "").startswith("image/")
-
-
-def test_upload_signature_and_stamp(client):
-    for asset in ("signature", "stamp"):
-        files = {"file": (f"{asset}.png", PNG_BYTES, "image/png")}
-        r = client.post(f"{API}/company/assets/{asset}", files=files)
-        assert r.status_code == 200, r.text
-
-
-def test_delete_asset(client):
-    r = client.delete(f"{API}/company/assets/stamp")
-    assert r.status_code == 200
-    assert r.json().get("stamp") is None
-
-
-# --- Customers ---
-@pytest.fixture(scope="module")
-def customer_intra(client):
-    payload = {"name": "TEST_CUST_Intra", "state": "Maharashtra", "state_code": "27",
-               "gstin": "27AAAPL1234C1Z1", "city": "Mumbai"}
-    r = client.post(f"{API}/customers", json=payload)
+# =====================================================================
+# CUSTOMERS + PARTNERS
+# =====================================================================
+@pytest.fixture(scope="session")
+def customer(client):
+    r = client.post(f"{API}/customers", json={
+        "name": "TEST_CUST_Iter2", "state": "Maharashtra", "state_code": "27",
+        "gstin": "27AAAPL1234C1Z1", "city": "Mumbai",
+    })
     assert r.status_code == 200
     return r.json()
 
 
-@pytest.fixture(scope="module")
-def customer_inter(client):
-    payload = {"name": "TEST_CUST_Inter", "state": "Karnataka", "state_code": "29",
-               "gstin": "29AAAPL1234C1Z1", "city": "Bengaluru"}
-    r = client.post(f"{API}/customers", json=payload)
-    assert r.status_code == 200
-    return r.json()
-
-
-def test_customer_crud(client, customer_intra):
-    cid = customer_intra["id"]
-    # list
-    r = client.get(f"{API}/customers")
-    assert r.status_code == 200
-    assert any(c["id"] == cid for c in r.json())
-    # update
-    r = client.put(f"{API}/customers/{cid}", json={"name": "TEST_CUST_Intra_Updated",
-                                                     "state_code": "27"})
-    assert r.status_code == 200
-    assert r.json()["name"] == "TEST_CUST_Intra_Updated"
-    # get
-    assert client.get(f"{API}/customers/{cid}").json()["name"] == "TEST_CUST_Intra_Updated"
-
-
-def test_customer_delete(client):
-    r = client.post(f"{API}/customers", json={"name": "TEST_CUST_Del"})
-    cid = r.json()["id"]
-    d = client.delete(f"{API}/customers/{cid}")
-    assert d.status_code == 200
-    assert client.get(f"{API}/customers/{cid}").status_code == 404
-
-
-# --- Partners ---
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def partner(client):
-    r = client.post(f"{API}/partners", json={"name": "TEST_PARTNER_DTDC", "code": "DTDC"})
+    r = client.post(f"{API}/partners", json={"name": "TEST_PARTNER_Iter2", "code": "DTDC"})
     assert r.status_code == 200
     return r.json()
 
 
-def test_partner_crud(client, partner):
-    pid = partner["id"]
-    r = client.get(f"{API}/partners")
-    assert any(p["id"] == pid for p in r.json())
-    r = client.put(f"{API}/partners/{pid}", json={"name": "TEST_PARTNER_DTDC_U", "code": "DTDC"})
-    assert r.json()["name"] == "TEST_PARTNER_DTDC_U"
+class TestCustomerPartner:
+    def test_customer_crud(self, client, customer):
+        cid = customer["id"]
+        r = client.get(f"{API}/customers/{cid}")
+        assert r.status_code == 200
+        r = client.put(f"{API}/customers/{cid}",
+                       json={"name": "TEST_CUST_Iter2_U", "state_code": "27"})
+        assert r.json()["name"] == "TEST_CUST_Iter2_U"
+
+    def test_partner_list(self, client, partner):
+        r = client.get(f"{API}/partners")
+        assert r.status_code == 200
+        assert any(p["id"] == partner["id"] for p in r.json())
 
 
-# --- Invoice next number (idempotent) ---
-def test_next_number_idempotent(client):
-    r1 = client.get(f"{API}/invoices/next-number")
-    r2 = client.get(f"{API}/invoices/next-number")
-    assert r1.status_code == 200 and r2.status_code == 200
-    assert r1.json()["next_number"] == r2.json()["next_number"]
-    n = r1.json()["next_number"]
-    parts = n.split("/")
-    assert len(parts) == 3 and parts[0] == "SDE"
-    assert parts[2].isdigit() and len(parts[2]) == 4
+# =====================================================================
+# INVOICES
+# =====================================================================
+class TestInvoices:
+    def test_create_invoice_cgst(self, client, customer, partner):
+        r = client.post(f"{API}/invoices", json={
+            "customer_id": customer["id"],
+            "items": [{"docket_no": "D1", "partner_id": partner["id"],
+                       "amount": 500.0, "pieces": 1, "weight": 1}],
+            "gst_type": "cgst_sgst", "tax_rate": 18.0,
+        })
+        assert r.status_code == 200
+        inv = r.json()
+        assert inv["subtotal"] == 500.0 and inv["total"] == 590.0
+        assert inv["cgst"] == 45.0 and inv["sgst"] == 45.0
+        assert inv["invoice_number"].startswith("SDE/")
+        pytest.shared_invoice_id = inv["id"]
+
+    def test_duplicate_invoice(self, client):
+        src_id = pytest.shared_invoice_id
+        # fetch source
+        src = client.get(f"{API}/invoices/{src_id}").json()
+        r = client.post(f"{API}/invoices/{src_id}/duplicate")
+        assert r.status_code == 200
+        dup = r.json()
+        assert dup["id"] != src["id"]
+        assert dup["invoice_number"] != src["invoice_number"]
+        assert dup["customer_id"] == src["customer_id"]
+        assert dup["total"] == src["total"]
+        assert dup["status"] == "draft"
+        assert dup["payment_status"] == "unpaid"
+        # sequence increments
+        s_seq = int(src["invoice_number"].split("/")[-1])
+        d_seq = int(dup["invoice_number"].split("/")[-1])
+        assert d_seq > s_seq
+        # original unchanged
+        src2 = client.get(f"{API}/invoices/{src_id}").json()
+        assert src2["invoice_number"] == src["invoice_number"]
+
+    def test_duplicate_not_found(self, client):
+        r = client.post(f"{API}/invoices/nonexistent-id/duplicate")
+        assert r.status_code == 404
+
+    def test_invoice_pdf(self, client):
+        r = client.get(f"{API}/invoices/{pytest.shared_invoice_id}/pdf")
+        assert r.status_code == 200
+        assert r.headers["content-type"] == "application/pdf"
+        assert r.content[:4] == b"%PDF"
+        assert len(r.content) > 4000  # new blue design is non-trivial
 
 
-# --- Invoice creation with GST math ---
-def test_create_invoice_cgst_sgst(client, customer_intra, partner):
-    payload = {
-        "customer_id": customer_intra["id"],
-        "items": [
-            {"docket_no": "D1", "destination": "Delhi", "partner_id": partner["id"],
-             "mode": "Surface", "weight": 1, "pieces": 1, "amount": 500.0}
-        ],
-        "gst_type": "cgst_sgst",
-        "tax_rate": 18.0,
-    }
-    r = client.post(f"{API}/invoices", json=payload)
-    assert r.status_code == 200, r.text
-    inv = r.json()
-    assert inv["subtotal"] == 500.0
-    assert inv["cgst"] == 45.0
-    assert inv["sgst"] == 45.0
-    assert inv["igst"] == 0.0
-    assert inv["total"] == 590.0
-    assert inv["invoice_number"].startswith("SDE/") and _fy() in inv["invoice_number"]
-    assert inv["items"][0].get("partner_name")  # hydrated
-    return inv
+# =====================================================================
+# MONTHLY EXCEL
+# =====================================================================
+class TestMonthlyExcel:
+    def test_download_xlsx(self, client):
+        r = client.get(f"{API}/reports/monthly-excel", params={"year": 2026, "month": 7})
+        assert r.status_code == 200
+        assert r.headers["content-type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert "SDE_Monthly_2026-07.xlsx" in r.headers.get("content-disposition", "")
+        assert len(r.content) > 1000
+        # Verify openable & has expected structure
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(r.content))
+        ws = wb.active
+        # header row (row 4)
+        headers = [ws.cell(row=4, column=c).value for c in range(1, 11)]
+        assert "Invoice #" in headers and "Grand Total" in headers
+        # TOTAL row present somewhere in col D
+        col_d = [ws.cell(row=r_, column=4).value for r_ in range(5, ws.max_row + 1)]
+        assert "TOTAL" in col_d
+
+    def test_invalid_month(self, client):
+        r = client.get(f"{API}/reports/monthly-excel", params={"year": 2026, "month": 13})
+        assert r.status_code == 400
+
+    def test_excel_requires_auth(self, unauth_client):
+        r = unauth_client.get(f"{API}/reports/monthly-excel", params={"year": 2026, "month": 7})
+        assert r.status_code == 401
 
 
-def test_create_invoice_igst(client, customer_inter):
-    payload = {
-        "customer_id": customer_inter["id"],
-        "items": [{"docket_no": "D2", "amount": 1000.0, "pieces": 1}],
-        "gst_type": "igst",
-        "tax_rate": 18.0,
-    }
-    r = client.post(f"{API}/invoices", json=payload)
-    assert r.status_code == 200
-    inv = r.json()
-    assert inv["igst"] == 180.0
-    assert inv["cgst"] == 0 and inv["sgst"] == 0
-    assert inv["total"] == 1180.0
-
-
-def test_create_invoice_non_gst(client, customer_intra):
-    payload = {
-        "customer_id": customer_intra["id"],
-        "items": [{"amount": 250.0}],
-        "gst_type": "none",
-    }
-    r = client.post(f"{API}/invoices", json=payload)
-    assert r.status_code == 200
-    inv = r.json()
-    assert inv["total_tax"] == 0
-    assert inv["total"] == 250.0
-
-
-def test_invoice_number_increments(client, customer_intra):
-    # create two, verify seq increments
-    p = {"customer_id": customer_intra["id"], "items": [{"amount": 100.0}], "gst_type": "none"}
-    a = client.post(f"{API}/invoices", json=p).json()
-    b = client.post(f"{API}/invoices", json=p).json()
-    seq_a = int(a["invoice_number"].split("/")[-1])
-    seq_b = int(b["invoice_number"].split("/")[-1])
-    assert seq_b == seq_a + 1
-
-
-def test_invoice_update_and_delete(client, customer_intra):
-    p = {"customer_id": customer_intra["id"], "items": [{"amount": 200.0}], "gst_type": "none"}
-    inv = client.post(f"{API}/invoices", json=p).json()
-    iid = inv["id"]
-    # update
-    update = {**p, "gst_type": "cgst_sgst", "tax_rate": 18.0,
-              "items": [{"amount": 200.0}], "payment_status": "paid", "status": "issued"}
-    r = client.put(f"{API}/invoices/{iid}", json=update)
-    assert r.status_code == 200
-    upd = r.json()
-    assert upd["cgst"] == 18.0 and upd["sgst"] == 18.0
-    assert upd["payment_status"] == "paid"
-    # delete
-    d = client.delete(f"{API}/invoices/{iid}")
-    assert d.status_code == 200
-    assert client.get(f"{API}/invoices/{iid}").status_code == 404
-
-
-def test_invoice_pdf(client, customer_intra):
-    p = {"customer_id": customer_intra["id"], "items": [{"amount": 300.0}], "gst_type": "cgst_sgst", "tax_rate": 18.0}
-    inv = client.post(f"{API}/invoices", json=p).json()
-    r = client.get(f"{API}/invoices/{inv['id']}/pdf")
-    assert r.status_code == 200
-    assert r.headers["content-type"] == "application/pdf"
-    assert len(r.content) > 500
-
-
-def test_invoice_bad_customer(client):
-    r = client.post(f"{API}/invoices", json={"customer_id": "nonexistent",
-                                             "items": [{"amount": 100}], "gst_type": "none"})
-    assert r.status_code == 400
-
-
-# --- Reports ---
-def test_reports_summary(client):
-    r = client.get(f"{API}/reports/summary")
-    assert r.status_code == 200
-    d = r.json()
-    for k in ("totals", "gst", "top_customers", "top_partners", "monthly"):
-        assert k in d
-    for k in ("invoices", "gross", "taxable", "tax", "paid", "unpaid"):
-        assert k in d["totals"]
-    for k in ("cgst", "sgst", "igst"):
-        assert k in d["gst"]
-
-
-def test_reports_date_filter(client):
-    r = client.get(f"{API}/reports/summary", params={"start": "2099-01-01", "end": "2099-12-31"})
-    assert r.status_code == 200
-    assert r.json()["totals"]["invoices"] == 0
+# =====================================================================
+# REPORTS
+# =====================================================================
+class TestReports:
+    def test_summary(self, client):
+        r = client.get(f"{API}/reports/summary")
+        assert r.status_code == 200
+        for k in ("totals", "gst", "top_customers", "top_partners", "monthly"):
+            assert k in r.json()

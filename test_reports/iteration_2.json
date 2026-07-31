@@ -1,0 +1,47 @@
+{
+  "summary": "Iteration 2 E2E testing: JWT auth, invoice list actions/filters/pagination, monthly Excel export, blue/white invoice redesign, collapsible sidebar. 25/25 pytest cases pass covering auth (login/logout/me/change-password/forgot/reset/lockout), protected endpoints (401 without auth, 200 with), duplicate invoice, monthly-excel xlsx generation + validation via openpyxl (headers + TOTAL row), and PDF (application/pdf, %PDF magic, >4KB). Frontend Playwright verified: login page, invalid-login stays on /login with toast, protected /invoices redirects to /login when logged out, valid login lands on app, sidebar collapses 256→64px with all 6 nav items, topbar shows packnfly96@gmail.com, session persists on refresh, invoice list filters/search/pagination/rows-per-page/kebab menu with all 6 actions (view/edit/print/pdf/duplicate/delete), invoice detail shows blue banner + TAX INVOICE + Bill To + items + blue Grand Total bar + bank details + signature area, Export Excel button + month/year selectors, change-password dialog opens with validation, logout clears session. All key data-testids present.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "Brute-force lockout uses `request.client.host` as part of the identifier. Behind the Kubernetes ingress/LB the client IP rotates across requests (observed 10.49.172.66 vs 10.49.172.69 for the same client), so the failure counter for a given attacker never reaches 5 through the public URL. Verified: 7 failed attempts through public URL all return 401 (not 429). From localhost, lockout correctly triggers on the 6th attempt. Fix: honour X-Forwarded-For / X-Real-IP header (use first entry) when building the identifier, or key the lockout on email alone with a global cap."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "InvoiceDetail toolbar", "issue": "Print, PDF, Duplicate, Edit, Delete buttons are visible and functional on the invoice detail toolbar, but they do not carry data-testid attributes (invoice-print-btn / invoice-pdf-btn / invoice-edit-btn / invoice-delete-btn / invoice-duplicate-btn) — makes robust automated testing harder.", "selector": "toolbar buttons in InvoiceDetail.jsx", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Login.jsx", "issues": ["`if (user) { navigate(...); return null; }` runs inside the render body of Login. React warns: 'Cannot update a component (Router) while rendering a different component (Login)'. Move the redirect into a useEffect."]},
+      {"screen": "Reports date filter", "issues": ["Still using browser-native <input type='date'> instead of shadcn Calendar (carried over from iteration 1)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix brute-force lockout to work behind the Kubernetes ingress: use X-Forwarded-For (first hop) or key the counter on email alone. Current implementation is effectively bypassable from the public URL.",
+    "Add data-testids to InvoiceDetail toolbar buttons (invoice-print-btn, invoice-pdf-btn, invoice-duplicate-btn, invoice-edit-btn, invoice-delete-btn).",
+    "Fix Login.jsx: move the `if (user) navigate(...)` redirect into a useEffect to remove the React 'setState during render' warning.",
+    "(carry-over) Replace native <input type='date'> on Reports page with shadcn Calendar/DatePicker for design consistency."
+  ],
+  "critical_code_review_comments": [
+    "auth backend: request.client.host is not proxy-aware. Behind any ingress/LB this both mis-attributes brute-force protection and skews any future audit logs. Should trust X-Forwarded-For when a known/allowed proxy is upstream.",
+    "routes_auth.py `_check_lockout` parses locked_until with datetime.fromisoformat — this only works because _record_failure stores it as ISO string; if that code ever switches to a raw datetime, retrieval will crash. Consider always storing datetimes as BSON dates and reading them directly.",
+    "Login.jsx conditional navigate inside render body triggers React warning; move to useEffect.",
+    "Sidebar/TopBar look clean and have proper data-testids — good.",
+    "routes.py `/api/company/assets/{type}/file` is protected by auth. Frontend loads it via <img src> tags relying on the httpOnly access_token cookie set on /auth/login. Works today but if SameSite/secure ever change, image loading will silently 401 with no fallback in the UI."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (rewrote to cover auth + duplicate + monthly-excel + PDF validation; 25 tests, all passing)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated)"
+  ],
+  "success_rate": {"backend": "100% (25/25 pytest)", "frontend": "~95% — all critical flows verified visually + programmatically; only nit is missing data-testids on the invoice-detail toolbar"},
+  "test_credentials": "Admin packnfly96@gmail.com / SDEnterprises@2026 (restored after change-password + reset-password tests)",
+  "seed_data_creation": "Backend tests created TEST_CUST_Iter2 (customer) and TEST_PARTNER_Iter2 (partner) plus several invoices; duplicate test also creates one more invoice per run. All are non-destructive additions.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend brute-force lockout bug is real: from the public URL, 6+ failed attempts still return 401 because the LB assigns a different pod IP per request. Local (curl http://localhost:8001) proves the code path is correct — issue is proxy IP handling. Do NOT re-test brute force from the public URL until the X-Forwarded-For fix lands; the test in backend_test.py hits localhost:8001 directly to prove the feature works. All auth flows (login/logout/me/change-password/forgot-password/reset-password) work end-to-end; the tests restore the admin password to SDEnterprises@2026 at the end of every mutating flow. Frontend: sidebar/topbar/invoice-list/invoice-detail all render correctly; only the invoice-detail action buttons lack data-testids.",
+  "rca of the issue": "Brute-force lockout key = f'{request.client.host}:{email}'. Behind ingress-nginx, request.client.host is the internal LB or upstream service IP which varies per request (observed at least two IPs). So each subsequent failed attempt from the same real client lands under a different identifier and the count never crosses MAX_ATTEMPTS=5 → HTTPException(429) is never raised. Mitigation: parse X-Forwarded-For (leftmost trusted IP) or key lockout by email only (with per-email global counter) since this is a single-admin app."
+}

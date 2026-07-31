@@ -3,6 +3,11 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Toaster } from "@/components/ui/sonner";
 import { Layout } from "@/components/Layout";
 import { CompanyProvider } from "@/context/CompanyContext";
+import { AuthProvider } from "@/context/AuthContext";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import Login from "@/pages/Login";
+import ForgotPassword from "@/pages/ForgotPassword";
+import ResetPassword from "@/pages/ResetPassword";
 import Dashboard from "@/pages/Dashboard";
 import InvoicesList from "@/pages/InvoicesList";
 import InvoiceForm from "@/pages/InvoiceForm";
@@ -14,10 +19,21 @@ import CompanySettings from "@/pages/CompanySettings";
 
 function App() {
   return (
-    <CompanyProvider>
+    <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route element={<Layout />}>
+          <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route
+            element={
+              <ProtectedRoute>
+                <CompanyProvider>
+                  <Layout />
+                </CompanyProvider>
+              </ProtectedRoute>
+            }
+          >
             <Route path="/" element={<Dashboard />} />
             <Route path="/invoices" element={<InvoicesList />} />
             <Route path="/invoices/new" element={<InvoiceForm />} />
@@ -31,7 +47,7 @@ function App() {
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" richColors />
-    </CompanyProvider>
+    </AuthProvider>
   );
 }
 

@@ -1,13 +1,14 @@
-"""API routes for the courier billing app."""
+"""API routes for the courier billing app (all require auth)."""
 import uuid
+import io
 from datetime import datetime, timezone, date
+from calendar import monthrange
 from typing import List, Optional
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-import io
 from PIL import Image as PILImage, UnidentifiedImageError
 
 from db import (
@@ -22,8 +23,9 @@ from models import (
     now_iso,
 )
 from pdf_service import build_invoice_pdf
+from auth import get_current_user
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
 
 
 # --------------------- Helpers ---------------------
@@ -417,12 +419,172 @@ async def api_invoice_pdf(invoice_id: str):
     )
 
 
-# --------------------- Reports ---------------------
+# --------------------- Reports & Utilities ---------------------
 class ReportRange(BaseModel):
     start: Optional[str] = None
     end: Optional[str] = None
 
 
+# Public health check — no auth (attached to a separate router at import time)
+public_router = APIRouter(prefix="/api")
+
+
+@public_router.get("/")
+async def api_root():
+    return {"ok": True, "service": "SD ENTERPRISES Courier Billing API"}
+
+
+# --------------------- Duplicate Invoice ---------------------
+@router.post("/invoices/{invoice_id}/duplicate")
+async def api_duplicate_invoice(invoice_id: str):
+    src = await db.invoices.find_one({"id": invoice_id}, {"_id": 0})
+    if not src:
+        raise HTTPException(404, "Invoice not found")
+    company = await get_or_create_company()
+
+    inv_date = date.today().isoformat()
+    fy = _current_fiscal_year(date.fromisoformat(inv_date))
+    prefix = company.invoice_prefix or "SDE"
+    number = await _next_invoice_number(prefix, fy)
+
+    new_inv = Invoice(
+        invoice_number=number,
+        fiscal_year=fy,
+        invoice_date=inv_date,
+        due_date=src.get("due_date", ""),
+        customer_id=src["customer_id"],
+        customer_name=src["customer_name"],
+        customer_address=src.get("customer_address", ""),
+        customer_city=src.get("customer_city", ""),
+        customer_state=src.get("customer_state", ""),
+        customer_state_code=src.get("customer_state_code", ""),
+        customer_pincode=src.get("customer_pincode", ""),
+        customer_gstin=src.get("customer_gstin", ""),
+        customer_phone=src.get("customer_phone", ""),
+        customer_email=src.get("customer_email", ""),
+        items=[InvoiceItem(**i) for i in src.get("items", [])],
+        gst_type=src.get("gst_type", "none"),
+        tax_rate=src.get("tax_rate", 18),
+        notes=src.get("notes", ""),
+        terms=src.get("terms", ""),
+        status="draft",
+        payment_status="unpaid",
+        subtotal=src.get("subtotal", 0),
+        cgst=src.get("cgst", 0),
+        sgst=src.get("sgst", 0),
+        igst=src.get("igst", 0),
+        total_tax=src.get("total_tax", 0),
+        round_off=src.get("round_off", 0),
+        total=src.get("total", 0),
+    )
+    await db.invoices.insert_one(new_inv.model_dump())
+    return new_inv.model_dump()
+
+
+# --------------------- Monthly Excel Export ---------------------
+@router.get("/reports/monthly-excel")
+async def api_monthly_excel(year: int, month: int):
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    if month < 1 or month > 12:
+        raise HTTPException(400, "Invalid month")
+    last_day = monthrange(year, month)[1]
+    start = f"{year:04d}-{month:02d}-01"
+    end = f"{year:04d}-{month:02d}-{last_day:02d}"
+
+    invoices = await db.invoices.find(
+        {"invoice_date": {"$gte": start, "$lte": end}}, {"_id": 0}
+    ).sort("invoice_date", 1).to_list(10000)
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"{year}-{month:02d}"
+
+    # Title
+    ws.merge_cells("A1:J1")
+    company = await get_or_create_company()
+    title = f"{company.name or 'SD ENTERPRISES'} — Monthly Sales Report"
+    ws["A1"] = title
+    ws["A1"].font = Font(name="Calibri", size=16, bold=True, color="1E3A8A")
+    ws["A1"].alignment = Alignment(horizontal="center")
+
+    ws.merge_cells("A2:J2")
+    month_name = date(year, month, 1).strftime("%B %Y")
+    ws["A2"] = f"Period: {month_name}  ·  {start} to {end}"
+    ws["A2"].font = Font(name="Calibri", size=11, italic=True, color="475569")
+    ws["A2"].alignment = Alignment(horizontal="center")
+
+    # Column headers
+    headers = ["Invoice #", "Date", "Customer", "Courier Partner", "PCS", "Weight (kg)",
+               "Amount", "GST", "Round Off", "Grand Total"]
+    header_row = 4
+    for col, h in enumerate(headers, start=1):
+        c = ws.cell(row=header_row, column=col, value=h)
+        c.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        c.fill = PatternFill("solid", fgColor="1E3A8A")
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = Border(bottom=Side(border_style="thin", color="0F172A"))
+
+    row = header_row + 1
+    tot_pcs = tot_wt = tot_amt = tot_gst = tot_round = tot_grand = 0.0
+    for inv in invoices:
+        items = inv.get("items", []) or []
+        partners = ", ".join(sorted({(it.get("partner_name") or "").strip() for it in items if it.get("partner_name")})) or "—"
+        pcs = sum(int(it.get("pieces", 0) or 0) for it in items)
+        wt = sum(float(it.get("weight", 0) or 0) for it in items)
+        amount = float(inv.get("subtotal", 0) or 0)
+        gst_amt = float(inv.get("total_tax", 0) or 0)
+        round_off = float(inv.get("round_off", 0) or 0)
+        grand = float(inv.get("total", 0) or 0)
+
+        values = [inv.get("invoice_number", ""), inv.get("invoice_date", ""), inv.get("customer_name", ""),
+                  partners, pcs, wt, amount, gst_amt, round_off, grand]
+        for col, v in enumerate(values, start=1):
+            cell = ws.cell(row=row, column=col, value=v)
+            cell.font = Font(name="Calibri", size=10)
+            if col >= 5:
+                cell.alignment = Alignment(horizontal="right")
+                if col >= 7:
+                    cell.number_format = "#,##0.00"
+        row += 1
+        tot_pcs += pcs
+        tot_wt += wt
+        tot_amt += amount
+        tot_gst += gst_amt
+        tot_round += round_off
+        tot_grand += grand
+
+    # Totals row
+    totals = ["", "", "", "TOTAL", tot_pcs, tot_wt, tot_amt, tot_gst, tot_round, tot_grand]
+    for col, v in enumerate(totals, start=1):
+        cell = ws.cell(row=row, column=col, value=v)
+        cell.font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+        cell.fill = PatternFill("solid", fgColor="0F172A")
+        cell.alignment = Alignment(horizontal="right" if col >= 5 else "center")
+        if col >= 7:
+            cell.number_format = "#,##0.00"
+
+    # Column widths
+    widths = [20, 12, 32, 24, 8, 12, 14, 14, 12, 16]
+    for i, w in enumerate(widths, start=1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+    ws.freeze_panes = "A5"
+
+    # Serialize
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    filename = f"SDE_Monthly_{year}-{month:02d}.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+# --------------------- Reports ---------------------
 @router.get("/reports/summary")
 async def api_reports_summary(start: Optional[str] = None, end: Optional[str] = None):
     q: dict = {}
@@ -489,7 +651,5 @@ async def api_reports_summary(start: Optional[str] = None, end: Optional[str] = 
     }
 
 
-# --------------------- Health ---------------------
-@router.get("/")
-async def api_root():
-    return {"ok": True, "service": "SD ENTERPRISES Courier Billing API"}
+# Health endpoint is defined on public_router above (line ~432).
+

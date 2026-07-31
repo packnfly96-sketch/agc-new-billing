@@ -32,14 +32,14 @@ code {
         --card-foreground: 222 47% 11%;
         --popover: 0 0% 100%;
         --popover-foreground: 222 47% 11%;
-        --primary: 222 47% 11%;
-        --primary-foreground: 0 0% 98%;
+        --primary: 224 76% 33%;
+        --primary-foreground: 0 0% 100%;
         --secondary: 210 40% 96.1%;
         --secondary-foreground: 222 47% 11%;
         --muted: 210 40% 96.1%;
         --muted-foreground: 215 16% 47%;
-        --accent: 210 40% 96.1%;
-        --accent-foreground: 222 47% 11%;
+        --accent: 214 100% 96%;
+        --accent-foreground: 224 76% 33%;
         --destructive: 0 84.2% 60.2%;
         --destructive-foreground: 0 0% 98%;
         --border: 214 32% 91%;
@@ -58,25 +58,32 @@ code {
     }
 }
 
-/* Print styles: hide app chrome, show only the invoice preview */
+/* Print styles: show ONLY the invoice preview at full width */
 @media print {
     html,
     body {
         background: #fff !important;
     }
+    aside,
     header,
     nav,
     .print\:hidden {
         display: none !important;
     }
-    main {
+    main,
+    [data-testid="invoice-detail-page"] > div:not(.print\:hidden) {
         padding: 0 !important;
+        margin: 0 !important;
         max-width: 100% !important;
     }
     [data-testid="invoice-preview"] {
         box-shadow: none !important;
         border: 0 !important;
-        padding: 0 !important;
+    }
+    /* Preserve blue backgrounds when printing */
+    * {
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
     }
 }
 
