@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 3 — final production sanity check. Backend: 30/30 pytest cases pass covering the new admin credentials (admin@sdenterprises.in / admin123), rejection of the OLD admin creds (packnfly96@gmail.com returns 401), brute-force lockout via public URL (now correctly returns 429 on 6th attempt since keying is by email — the ingress-IP bug from iteration 2 is fixed), /auth/me + logout + change-password + forgot/reset flows (all restore back to admin123), empty-state (customers=[], partners=[], invoices=[], company defaults to SD ENTERPRISES with no assets, next-number SDE/2026-27/0001, uploads/company/ empty), company update + logo upload/get/delete, customer & partner CRUD, invoice create → duplicate → update → PDF (>3.5KB, %PDF magic) → delete cleanup, monthly-excel xlsx + 400 on invalid month, reports summary shape. Frontend Playwright: all 6 protected routes (/, /invoices, /invoices/new, /customers, /partners, /reports, /settings/company) redirect to /login when unauthed and render correctly when logged in; login with new admin lands on Dashboard; /login while authed redirects to /; token persisted in localStorage as sde_access_token (len 235); session survives reload; sidebar has all 6 nav items (Dashboard, Invoices, Customers, Courier Partners, Reports, Settings); Dashboard shows 0 invoices / ₹0 billed / ₹0 collected / ₹0 outstanding / 'No invoices yet — create your first one'; Invoices/Customers/Partners empty-states present; Settings > My Company pre-fills name 'SD ENTERPRISES' with no logo/signature/stamp; user menu opens with Change password + Sign out items; logout clears sde_access_token and returns to /login. No console warnings/errors (Login.jsx setState-during-render is gone). DB restored to fully clean state after tests: 0 customers, 0 partners, 0 invoices, empty company, counter=0001, uploads dir empty.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Reports date filter", "issues": ["Still using native <input type='date'> instead of shadcn Calendar (carried over from iteration 1/2; low priority — functional)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Brute-force lockout key is now `email:{email}` (routes_auth.py:76) — proxy-IP bug from iteration 2 is fixed; verified via public URL (429 on 6th attempt). Consider a small per-IP outer cap too, so a single attacker cannot burn one email at a time indefinitely, but not blocking for this MVP.",
+    "PUT /api/invoices/{id} requires the full InvoiceCreate payload (customer_id + items + gst_type + tax_rate). Partial PATCH semantics are not supported — fine for the current UI which always sends full payload, but documenting for future reference.",
+    "seed_admin correctly re-hashes ADMIN_PASSWORD on every startup; confirmed the old user was purged and only the new admin@sdenterprises.in exists (old creds return 401).",
+    "GET /api/company auto-creates the default doc on first read (get_or_create_company) — perfect for empty-DB bootstrap; confirmed after wipe.",
+    "PDF file size is 3.9KB for a bare-minimum invoice (no logo/signature/full customer address). Realistic invoices with brand assets sail past 4KB, so the >3.5KB threshold in tests is safe but you may want to bump default template padding for a more professional feel."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (rewritten for iteration 3: new admin creds, old-cred rejection, empty-state suite, class-scoped invoice fixture, teardown cleans customers/partners/invoices)",
+    "/app/test_reports/pytest/pytest_results.xml (regenerated, 30 passed)"
+  ],
+  "success_rate": {"backend": "100% (30/30 pytest)", "frontend": "100% — all critical flows verified end-to-end"},
+  "test_credentials": "Admin: admin@sdenterprises.in / admin123 (restored after every mutating auth test)",
+  "seed_data_creation": "Tests create TEST_CUST_Iter3, TEST_PARTNER_Iter3 and 2 invoices (original + duplicate) inside class-scoped fixtures. All are deleted at the end of the suite. Post-test cleanup also wiped counters + login_attempts + reset company GSTIN/bank so DB is truly empty for production handoff.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "App is production-ready. DB is clean: users has only the seeded admin, company has default 'SD ENTERPRISES' doc with empty fields and no assets, customers/partners/invoices/counters/login_attempts collections are all empty, /app/backend/uploads/company/ is empty. Default admin creds are baked into /app/backend/.env (ADMIN_EMAIL=admin@sdenterprises.in, ADMIN_PASSWORD=admin123). To rotate: edit .env and `sudo supervisorctl restart backend`. Frontend token key: sde_access_token. Brute-force lockout is now email-keyed (5 attempts / 15 min per email) and works through the public ingress. If re-running backend_test.py, note that class-scoped fixtures create seed data that is cleaned up automatically; company GSTIN/bank_name and invoice counter will be mutated during the test run and are NOT restored automatically — either accept the residue or run the post-test cleanup snippet from this iteration's log.",
+  "rca of the issue": "N/A — no bugs found in this iteration. Iteration 2's brute-force IP bug is fixed by keying on email; iteration 2's Login.jsx setState-during-render is fixed (no React warnings in console)."
+}
