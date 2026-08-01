@@ -1,6 +1,7 @@
 import axios from "axios";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+// यहाँ सीधे Render का लाइव बैकएंड यूआरएल फिक्स कर दिया गया है
+const BACKEND_URL = "https://sd-new-billing-backend.onrender.com";
 export const API_BASE = `${BACKEND_URL}/api`;
 
 const TOKEN_KEY = "sde_access_token";
@@ -109,9 +110,5 @@ export const reportsApi = {
     a.href = url;
     a.download = `SDE_Monthly_${year}-${String(month).padStart(2, "0")}.xlsx`;
     a.click();
-  },
-};
-    document.body.appendChild(a); a.click(); a.remove();
-    URL.revokeObjectURL(url);
   },
 };
