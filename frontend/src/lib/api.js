@@ -1,6 +1,5 @@
 import axios from "axios";
-
-// यहाँ सीधे Render का लाइव बैकएंड यूआरएल फिक्स कर दिया गया है
+// Render backend URL
 const BACKEND_URL = "https://sd-new-billing-backend.onrender.com";
 export const API_BASE = `${BACKEND_URL}/api`;
 
