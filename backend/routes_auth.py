@@ -13,7 +13,7 @@ from auth import (
 
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 9999999
 LOCKOUT_MINUTES = 15
 
 
@@ -75,14 +75,14 @@ async def login(payload: LoginRequest, request: Request, response: Response):
     # counter on the email alone (global per-account cap).
     identifier = f"email:{email}"
 
-    await _check_lockout(identifier)
+    #await _check_lockout(identifier)
 
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
-        await _record_failure(identifier)
+        #await _record_failure(identifier)
         raise HTTPException(401, "Invalid email or password.")
 
-    await _clear_failures(identifier)
+    #await _clear_failures(identifier)
     token = create_access_token(user_id=user.get("id", email), email=email)
 
     # Set cookie for browsers that support it (same-origin), also return in body for Bearer usage
