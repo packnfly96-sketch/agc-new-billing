@@ -62,7 +62,6 @@ export const companyApi = {
 export const assetUrl = (company, assetType) => {
   if (!company?.[assetType]) return null;
   const v = encodeURIComponent(company.updated_at || Date.now());
-  // Backend auth is via same-origin httpOnly cookie (set on login) — <img>/<iframe> inherit it automatically.
   return `${API_BASE}/company/assets/${assetType}/file?v=${v}`;
 };
 
@@ -109,6 +108,9 @@ export const reportsApi = {
     const a = document.createElement("a");
     a.href = url;
     a.download = `SDE_Monthly_${year}-${String(month).padStart(2, "0")}.xlsx`;
+    a.click();
+  },
+};
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
   },
