@@ -26,7 +26,7 @@ from pdf_service import build_invoice_pdf
 from auth import get_current_user
 
 router = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])
-
+public_router = APIRouter(prefix="/api")
 
 # --------------------- Helpers ---------------------
 ASSET_FIELDS = {"logo", "signature", "stamp"}
@@ -188,7 +188,7 @@ async def api_remove_asset(asset_type: str):
     return (await get_or_create_company()).model_dump()
 
 
-@public_router.get("/company/assets/{asset_type}/file")
+@router.get("/company/assets/{asset_type}/file")
 async def api_get_asset_file(asset_type: str):
     if asset_type not in ASSET_FIELDS:
         raise HTTPException(400, f"Unknown asset type '{asset_type}'.")
