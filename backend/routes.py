@@ -188,7 +188,7 @@ async def api_remove_asset(asset_type: str):
     return (await get_or_create_company()).model_dump()
 
 
-@router.get("/company/assets/{asset_type}/file")
+@public_router.get("/company/assets/{asset_type}/file")
 async def api_get_asset_file(asset_type: str):
     if asset_type not in ASSET_FIELDS:
         raise HTTPException(400, f"Unknown asset type '{asset_type}'.")
